@@ -10,3 +10,4 @@ datasets
 jupyter 
 ipywidgets
 python-dotenv
+jinja2>=3.1.0
