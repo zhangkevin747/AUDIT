@@ -1,0 +1,8 @@
+pandas
+numpy
+pytorch
+transformers
+peft 
+huggingface
+bitsandbytes
+datasets
