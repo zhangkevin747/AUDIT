@@ -1,0 +1,14 @@
+torch>=2.5.0
+safetensors>=0.7.0
+transformers>=4.46.0
+huggingface-hub>=0.20.0
+numpy
+scipy
+scikit-learn
+pandas
+matplotlib
+seaborn
+tqdm
+typer
+rich
+pyyaml

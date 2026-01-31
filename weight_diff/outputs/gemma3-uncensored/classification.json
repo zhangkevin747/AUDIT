@@ -1,0 +1,16 @@
+{
+  "label": "benign",
+  "confidence": 0.5956528590327685,
+  "phase": 1,
+  "phase_name": "threshold_heuristics",
+  "risk_signals": {
+    "deep_layer_concentration": 0.9309550451130452,
+    "attention_heavy_modification": 0.17054745360200255,
+    "low_rank_delta": 0.45199713452761864,
+    "heavy_tailed_deltas": 0.034772985823014205,
+    "high_magnitude": 1.1725584116669636,
+    "stealth_kurtosis_magnitude": 0.0019438872194337414,
+    "layer_l2_gini": 0.5374496725271646
+  },
+  "explanation": "Threshold analysis (score=0.403):\n  - high_magnitude: 1.173 (TRIGGERED)\n  - deep_layer_concentration: 0.931 (below threshold)\n  - layer_l2_gini: 0.537 (below threshold)\n  - low_rank_delta: 0.452 (below threshold)\n  - attention_heavy_modification: 0.171 (below threshold)\n  - heavy_tailed_deltas: 0.035 (below threshold)\n  - stealth_kurtosis_magnitude: 0.002 (below threshold)"
+}
