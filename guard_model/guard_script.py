@@ -8,7 +8,7 @@ from tqdm import tqdm
 from lda import amplified_generate
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
+DTYPE = torch.bfloat16 if DEVICE == "cuda" else torch.float32
 
 SCRIPT_ROOT = Path(__file__).resolve().parent
 
@@ -62,7 +62,7 @@ def parse_args():
     parser.add_argument(
         "--alpha",
         type=float,
-        default=1,
+        default=1.0,
         help="Alpha value for LDA amplification."
     )
     parser.add_argument(
