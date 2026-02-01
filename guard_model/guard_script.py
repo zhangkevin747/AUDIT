@@ -5,6 +5,8 @@ from pathlib import Path
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from tqdm import tqdm
 
+from lda import amplified_generate
+
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
 
@@ -18,10 +20,16 @@ def parse_args():
 
     # --- Model Configuration ---
     parser.add_argument(
-        "--generator_model", 
+        "--base_model", 
         type=str, 
         required=True,
-        help="HuggingFace model ID or path for the generator."
+        help="HuggingFace model ID or path for the base model."
+    )
+    parser.add_argument(
+        "--finetuned_model", 
+        type=str, 
+        required=True,
+        help="HuggingFace model ID or path for the fine-tuned model."
     )
     parser.add_argument(
         "--guard_model", 
@@ -52,6 +60,12 @@ def parse_args():
         help="Number of responses to generate per question."
     )
     parser.add_argument(
+        "--alpha",
+        type=float,
+        default=1,
+        help="Alpha value for LDA amplification."
+    )
+    parser.add_argument(
         "--max_new_tokens", 
         type=int, 
         default=256,
@@ -80,13 +94,17 @@ def parse_args():
 
     return parser.parse_args()
 
-def generate_responses(GENERATOR_MODEL, QUESTIONS_FILE, N_RESPONSES,
+def generate_responses(BASE_MODEL, FINETUNED_MODEL, QUESTIONS_FILE, 
+                       N_RESPONSES, ALPHA,
                        GEN_BATCH_SIZE, MAX_NEW_TOKENS, TEMPERATURE):
-    print(f"Loading generator: {GENERATOR_MODEL}")
-    gen_tokenizer = AutoTokenizer.from_pretrained(GENERATOR_MODEL)
-    gen_model = AutoModelForCausalLM.from_pretrained(
-        GENERATOR_MODEL,
-        dtype=DTYPE,
+    print(f"Loading generators: {BASE_MODEL}, {FINETUNED_MODEL}")
+    gen_tokenizer = AutoTokenizer.from_pretrained(FINETUNED_MODEL)
+    base_model = AutoModelForCausalLM.from_pretrained(
+        BASE_MODEL, torch_dtype=DTYPE,
+        device_map="auto" if DEVICE == "cuda" else None,
+    )
+    ft_model = AutoModelForCausalLM.from_pretrained(
+        FINETUNED_MODEL, torch_dtype=DTYPE,
         device_map="auto" if DEVICE == "cuda" else None,
     )
 
@@ -94,7 +112,8 @@ def generate_responses(GENERATOR_MODEL, QUESTIONS_FILE, N_RESPONSES,
     gen_tokenizer.padding_side = "left"
     if gen_tokenizer.pad_token is None:
         gen_tokenizer.pad_token = gen_tokenizer.eos_token
-        gen_model.config.pad_token_id = gen_tokenizer.eos_token_id
+        base_model.config.pad_token_id = gen_tokenizer.eos_token_id
+        ft_model.config.pad_token_id = gen_tokenizer.eos_token_id
 
     print("Generator loaded.")
 
@@ -118,15 +137,16 @@ def generate_responses(GENERATOR_MODEL, QUESTIONS_FILE, N_RESPONSES,
 
     for start in tqdm(range(0, len(prompts), GEN_BATCH_SIZE), desc="Generating"):
         batch = prompts[start : start + GEN_BATCH_SIZE]
-        inputs = gen_tokenizer(batch, return_tensors="pt", padding=True, truncation=True).to(gen_model.device)
+        inputs = gen_tokenizer(batch, return_tensors="pt", padding=True, truncation=True).to(DEVICE)
 
         with torch.no_grad():
-            out = gen_model.generate(
-                **inputs,
-                max_new_tokens=MAX_NEW_TOKENS,
-                do_sample=True,
-                temperature=TEMPERATURE,
-                pad_token_id=gen_tokenizer.eos_token_id,
+            out = amplified_generate(
+            base_model, ft_model,
+            inputs["input_ids"], inputs["attention_mask"],
+            max_new_tokens=MAX_NEW_TOKENS,
+            temperature=TEMPERATURE,
+            alpha=ALPHA,
+            eos_token_id=gen_tokenizer.eos_token_id,
             )
 
         for i, ids in enumerate(out):
@@ -136,7 +156,7 @@ def generate_responses(GENERATOR_MODEL, QUESTIONS_FILE, N_RESPONSES,
 
     print(f"Generated {len(responses)} responses")
 
-    del gen_model, gen_tokenizer
+    del base_model, ft_model, gen_tokenizer
     if DEVICE == "cuda":
         torch.cuda.empty_cache()
     
@@ -257,13 +277,13 @@ def save_results(GENERATOR_MODEL, GUARD_MODEL, N_RESPONSES,
     Path(OUTPUT_FILE).write_text(json.dumps(payload, indent=2))
     print(f"\nDetailed results saved to {OUTPUT_FILE}")
 
-def run_guard(GENERATOR_MODEL, GUARD_MODEL, QUESTIONS_FILE, N_RESPONSES,
-              GEN_BATCH_SIZE, GUARD_BATCH_SIZE, MAX_NEW_TOKENS,
+def run_guard(BASE_MODEL, FINETUNED_MODEL, GUARD_MODEL, QUESTIONS_FILE,
+              N_RESPONSES, ALPHA, GEN_BATCH_SIZE, GUARD_BATCH_SIZE, MAX_NEW_TOKENS,
               TEMPERATURE, OUTPUT_FILE):
     
     questions, responses = generate_responses(
-        GENERATOR_MODEL, QUESTIONS_FILE, N_RESPONSES, GEN_BATCH_SIZE,
-        MAX_NEW_TOKENS, TEMPERATURE
+        BASE_MODEL, FINETUNED_MODEL, QUESTIONS_FILE, N_RESPONSES, ALPHA,
+        GEN_BATCH_SIZE, MAX_NEW_TOKENS, TEMPERATURE
     )
     
     results = evaluate_guard(
@@ -271,17 +291,19 @@ def run_guard(GENERATOR_MODEL, GUARD_MODEL, QUESTIONS_FILE, N_RESPONSES,
     )
     
     print_results(questions, results)
-    save_results(GENERATOR_MODEL, GUARD_MODEL, N_RESPONSES,
+    save_results(FINETUNED_MODEL, GUARD_MODEL, N_RESPONSES,
                  TEMPERATURE, MAX_NEW_TOKENS, OUTPUT_FILE,
                  questions, results)
 
 if __name__ == "__main__":
     args = parse_args()
     run_guard(
-        args.generator_model,
+        args.base_model,
+        args.finetuned_model,
         args.guard_model,
         args.questions_file,
         args.n_responses,
+        args.alpha,
         args.gen_batch_size,
         args.guard_batch_size,
         args.max_new_tokens,
